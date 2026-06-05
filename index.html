@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Last Signal</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#020510;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:monospace}
+h1{color:#88CCFF;font-size:20px;margin-bottom:12px;letter-spacing:4px}
+#wrap{border-radius:12px;overflow:hidden;border:1px solid #1A3050}
+#gc{display:block;background:#03050F;cursor:none;outline:none}
+#ui{font-size:13px;color:#88CCFF;display:flex;gap:16px;padding:8px 12px;background:#050A18;align-items:center;flex-wrap:wrap}
+#controls{font-size:12px;color:#446688;padding:6px 12px;text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+<h1>THE LAST SIGNAL</h1>
+<div id="wrap">
+<canvas id="gc" width="680" height="380" tabindex="0"></canvas>
+<div id="ui">
+  <span>HP: <span id="hp">♥♥♥</span></span>
+  <span>Кристаллы: <span id="score">0/0</span></span>
+  <span>Уровень: <span id="lvl">1</span></span>
+  <span id="msg" style="margin-left:auto;color:#FF8844"></span>
+</div>
+</div>
+<div id="controls">← → двигаться &nbsp;|&nbsp; Пробел / ↑ прыгнуть (двойной прыжок) &nbsp;|&nbsp; R — перезапустить &nbsp;|&nbsp; Собери ВСЕ кристаллы чтобы открыть выход!</div>
+
+<script>
+const canvas=document.getElementById('gc');
+const ctx=canvas.getContext('2d');
+const W=680,H=380;
+const GRAV=0.45,JUMP=-10.5,SPEED=3.5;
+
+const LEVELS=[
+  {
+    platforms:[
+      {x:0,y:340,w:680,h:40,col:'#1A2840'},
+      {x:80,y:270,w:100,h:14,col:'#1E3A5A'},
+      {x:240,y:220,w:120,h:14,col:'#1E3A5A'},
+      {x:420,y:170,w:100,h:14,col:'#1E3A5A'},
+      {x:560,y:240,w:100,h:14,col:'#1E3A5A'},
+      {x:310,y:130,w:80,h:14,col:'#253A5A'},
+      {x:150,y:160,w:70,h:14,col:'#253A5A'},
+    ],
+    crystals:[
+      {x:120,y:250},{x:270,y:200},{x:460,y:150},{x:590,y:220},{x:340,y:110},{x:180,y:140}
+    ],
+    enemies:[
+      {x:250,y:200,dir:1,speed:1.2,w:24,h:24,startX:240,rangeX:120,alive:true},
+      {x:440,y:150,dir:-1,speed:1.5,w:24,h:24,startX:420,rangeX:100,alive:true},
+    ],
+    exit:{x:635,y:300},
+    bg:'#03050F'
+  },
+  {
+    platforms:[
+      {x:0,y:340,w:200,h:40,col:'#1A2840'},
+      {x:260,y:340,w:180,h:40,col:'#1A2840'},
+      {x:500,y:340,w:180,h:40,col:'#1A2840'},
+      {x:60,y:260,w:90,h:14,col:'#1E3A5A'},
+      {x:200,y:200,w:90,h:14,col:'#1E3A5A'},
+      {x:350,y:250,w:90,h:14,col:'#1E3A5A'},
+      {x:490,y:190,w:90,h:14,col:'#1E3A5A'},
+      {x:590,y:260,w:90,h:14,col:'#1E3A5A'},
+      {x:280,y:145,w:120,h:14,col:'#253A5A'},
+      {x:130,y:120,w:70,h:14,col:'#253A5A'},
+      {x:460,y:110,w:80,h:14,col:'#253A5A'},
+    ],
+    crystals:[
+      {x:90,y:240},{x:230,y:180},{x:380,y:230},{x:520,y:170},{x:310,y:125},{x:160,y:100},{x:490,y:90}
+    ],
+    enemies:[
+      {x:60,y:240,dir:1,speed:1.5,w:24,h:24,startX:60,rangeX:90,alive:true},
+      {x:360,y:230,dir:-1,speed:1.8,w:24,h:24,startX:350,rangeX:90,alive:true},
+      {x:490,y:170,dir:1,speed:2,w:24,h:24,startX:490,rangeX:90,alive:true},
+      {x:280,y:125,dir:-1,speed:1.6,w:24,h:24,startX:280,rangeX:120,alive:true},
+    ],
+    exit:{x:635,y:310},
+    bg:'#020308'
+  }
+];
+
+let lv=0,state='play',tick=0;
+let player,enemies,crystals,particles;
+
+function allCollected(){return crystals.every(c=>c.collected);}
+
+function initLevel(){
+  const L=LEVELS[lv];
+  player={x:40,y:280,w:22,h:30,vx:0,vy:0,onGround:false,jumps:0,facing:1,invincible:0,hp:player?player.hp:3};
+  enemies=L.enemies.map(e=>({...e,alive:true}));
+  crystals=L.crystals.map(c=>({...c,collected:false}));
+  particles=[];
+  state='play';
+  updateUI();
+}
+
+function updateUI(){
+  document.getElementById('hp').textContent='♥'.repeat(Math.max(0,player.hp));
+  const col=allCollected()?'#00FFCC':'#FF8844';
+  document.getElementById('score').style.color=col;
+  document.getElementById('score').textContent=crystals.filter(c=>c.collected).length+'/'+crystals.length;
+  document.getElementById('lvl').textContent=lv+1;
+  document.getElementById('msg').textContent=allCollected()?'Выход открыт! Иди к порталу!':'Собери все кристаллы!';
+  document.getElementById('msg').style.color=allCollected()?'#00FFCC':'#FF6622';
+}
+
+const keys={};
+document.addEventListener('keydown',e=>{
+  if(['ArrowLeft','ArrowRight','ArrowUp','Space',' '].includes(e.key)||e.code==='Space'){e.preventDefault();}
+  keys[e.code]=true;keys[e.key]=true;
+  if((e.code==='Space'||e.key==='ArrowUp'||e.key===' ')&&state==='play'){
+    if(player.jumps<2){player.vy=JUMP-(player.jumps*1.5);player.jumps++;spawnParticles(player.x+player.w/2,player.y+player.h,'#0088FF',4);}
+  }
+  if(e.code==='KeyR'||e.key==='r')restart();
+});
+document.addEventListener('keyup',e=>{keys[e.code]=false;keys[e.key]=false;});
+canvas.addEventListener('click',()=>canvas.focus());
+canvas.focus();
+
+function rectOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
+
+function spawnParticles(x,y,col,n){
+  for(let i=0;i<n;i++){
+    particles.push({x,y,vx:(Math.random()-0.5)*4,vy:(Math.random()-2)*3,life:1,col});
+  }
+}
+
+function restart(){lv=0;player={hp:3};initLevel();document.getElementById('msg').textContent='';}
+
+initLevel();
+
+function update(){
+  if(state!=='play')return;
+  const L=LEVELS[lv];
+
+  if(keys['ArrowLeft']||keys['KeyA']){player.vx=-SPEED;player.facing=-1;}
+  else if(keys['ArrowRight']||keys['KeyD']){player.vx=SPEED;player.facing=1;}
+  else player.vx*=0.7;
+
+  player.vy+=GRAV;
+  player.x+=player.vx;
+  player.y+=player.vy;
+  player.onGround=false;
+
+  for(const p of L.platforms){
+    if(rectOverlap(player,p)){
+      const overlapX=Math.min(player.x+player.w,p.x+p.w)-Math.max(player.x,p.x);
+      const overlapY=Math.min(player.y+player.h,p.y+p.h)-Math.max(player.y,p.y);
+      if(overlapY<overlapX){
+        if(player.vy>0&&player.y+player.h-player.vy<=p.y+2){
+          player.y=p.y-player.h;player.vy=0;player.onGround=true;player.jumps=0;
+        } else if(player.vy<0){player.y=p.y+p.h;player.vy=0;}
+      } else {
+        if(player.vx>0){player.x=p.x-player.w;}else{player.x=p.x+p.w;}
+        player.vx=0;
+      }
+    }
+  }
+
+  if(player.x<0)player.x=0;
+  if(player.x+player.w>W)player.x=W-player.w;
+  if(player.y>H+50){
+    player.hp--;
+    spawnParticles(player.x,player.y,'#FF4444',8);
+    if(player.hp<=0){state='dead';document.getElementById('msg').textContent='Игра окончена! R — перезапустить';document.getElementById('msg').style.color='#FF4444';}
+    else{player.x=40;player.y=260;player.vy=0;player.vx=0;player.invincible=60;}
+    updateUI();
+  }
+
+  if(player.invincible>0)player.invincible--;
+
+  for(const e of enemies){
+    if(!e.alive)continue;
+    e.x+=e.speed*e.dir;
+    if(e.x<=e.startX||e.x+e.w>=e.startX+e.rangeX)e.dir*=-1;
+    if(player.invincible===0&&rectOverlap(player,e)){
+      if(player.vy>2&&player.y+player.h<e.y+e.h*0.6){
+        spawnParticles(e.x+e.w/2,e.y,'#FF6600',8);
+        e.alive=false;player.vy=-8;
+      } else {
+        player.hp--;player.invincible=90;
+        spawnParticles(player.x+player.w/2,player.y+player.h/2,'#FF2222',6);
+        if(player.hp<=0){state='dead';document.getElementById('msg').textContent='Игра окончена! R — перезапустить';document.getElementById('msg').style.color='#FF4444';}
+        updateUI();
+      }
+    }
+  }
+
+  let changed=false;
+  for(const c of crystals){
+    if(!c.collected&&Math.abs(player.x+player.w/2-c.x)<18&&Math.abs(player.y+player.h/2-c.y)<18){
+      c.collected=true;spawnParticles(c.x,c.y,'#00FFCC',8);changed=true;
+    }
+  }
+  if(changed)updateUI();
+
+  const ex=L.exit;
+  if(allCollected()&&Math.abs(player.x+player.w/2-ex.x)<28&&Math.abs(player.y+player.h-ex.y)<35){
+    if(lv<LEVELS.length-1){lv++;initLevel();}
+    else{state='win';document.getElementById('msg').textContent='Победа! Сигнал найден!';document.getElementById('msg').style.color='#00FFCC';}
+  }
+
+  particles=particles.filter(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=0.15;p.life-=0.04;return p.life>0;});
+}
+
+function drawStars(){
+  const stars=[[55,30],[120,15],[200,45],[300,20],[410,35],[500,12],[600,28],[650,50],[80,60],[350,55],[480,70],[30,80],[160,75],[440,25],[540,65]];
+  for(const[x,y]of stars){
+    ctx.globalAlpha=0.5+0.4*Math.sin(tick*0.02+x);
+    ctx.fillStyle='#FFFFFF';ctx.fillRect(x,y,1.5,1.5);
+  }
+  ctx.globalAlpha=1;
+}
+
+function drawPlayer(){
+  const p=player;
+  if(p.invincible>0&&Math.floor(p.invincible/6)%2===0)return;
+  ctx.save();
+  if(p.facing===-1){ctx.translate(p.x+p.w,p.y);ctx.scale(-1,1);}else{ctx.translate(p.x,p.y);}
+  ctx.fillStyle='#3A5070';ctx.fillRect(0,12,p.w,p.h-12);
+  ctx.fillStyle='#5A8090';ctx.fillRect(2,12,p.w-4,10);
+  ctx.fillStyle='#2A3A50';ctx.fillRect(1,p.h-8,9,8);ctx.fillRect(p.w-10,p.h-8,9,8);
+  ctx.fillStyle='#1A2A40';ctx.fillRect(0,p.h-5,11,5);ctx.fillRect(p.w-11,p.h-5,11,5);
+  ctx.fillStyle='#1A3050';ctx.beginPath();ctx.arc(p.w/2,10,10,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#004488';ctx.beginPath();ctx.arc(p.w/2+1,10,6,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#0088EE';ctx.beginPath();ctx.arc(p.w/2-1,9,3,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#0066FF';ctx.fillRect(p.w/2+1,20,5,4);
+  ctx.restore();
+}
+
+function drawEnemy(e){
+  if(!e.alive)return;
+  ctx.fillStyle='#441A1A';ctx.fillRect(e.x,e.y,e.w,e.h);
+  ctx.fillStyle='#882222';ctx.fillRect(e.x+2,e.y+2,e.w-4,e.h*0.6);
+  ctx.fillStyle='#FF4444';ctx.fillRect(e.x+6,e.y+6,5,5);ctx.fillRect(e.x+e.w-11,e.y+6,5,5);
+  ctx.fillStyle='#CC2222';ctx.fillRect(e.x+2,e.y+e.h*0.6,e.w-4,e.h*0.4);
+}
+
+function drawCrystal(c,i){
+  if(c.collected)return;
+  const bob=Math.sin(tick*0.06+i)*3;
+  const cx=c.x,cy=c.y+bob;
+  ctx.strokeStyle='#00AAFF';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(cx,cy-10);ctx.lineTo(cx+7,cy);ctx.lineTo(cx,cy+10);ctx.lineTo(cx-7,cy);ctx.closePath();
+  ctx.fillStyle='#003388';ctx.fill();ctx.stroke();
+  ctx.strokeStyle='#44DDFF';ctx.lineWidth=0.8;
+  ctx.beginPath();ctx.moveTo(cx,cy-8);ctx.lineTo(cx+4,cy);ctx.lineTo(cx,cy+8);ctx.lineTo(cx-4,cy);ctx.closePath();ctx.stroke();
+  ctx.fillStyle='#88FFFF';ctx.globalAlpha=0.5;ctx.beginPath();ctx.arc(cx-1,cy-2,2,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+}
+
+function drawExit(ex){
+  const open=allCollected();
+  const pulse=0.7+0.3*Math.sin(tick*0.08);
+  if(open){
+    ctx.strokeStyle=`rgba(0,255,180,${pulse})`;ctx.lineWidth=2.5;
+  } else {
+    ctx.strokeStyle='rgba(80,80,120,0.7)';ctx.lineWidth=2;
+  }
+  ctx.strokeRect(ex.x-18,ex.y-44,36,44);
+  if(open){
+    ctx.fillStyle=`rgba(0,200,120,${0.2*pulse})`;
+    ctx.fillRect(ex.x-18,ex.y-44,36,44);
+    ctx.fillStyle=`rgba(0,255,180,${pulse})`;
+    ctx.font='bold 11px monospace';ctx.textAlign='center';
+    ctx.fillText('ВЫХОД',ex.x,ex.y-6);
+    for(let j=0;j<3;j++){
+      const angle=tick*0.05+j*2.1;
+      const rx=ex.x+Math.cos(angle)*24,ry=ex.y-22+Math.sin(angle)*10;
+      ctx.fillStyle=`rgba(0,255,180,${0.4*pulse})`;
+      ctx.beginPath();ctx.arc(rx,ry,3,0,Math.PI*2);ctx.fill();
+    }
+  } else {
+    ctx.fillStyle='rgba(80,80,120,0.15)';
+    ctx.fillRect(ex.x-18,ex.y-44,36,44);
+    ctx.fillStyle='rgba(150,150,200,0.6)';
+    ctx.font='bold 11px monospace';ctx.textAlign='center';
+    ctx.fillText('ЗАКРЫТ',ex.x,ex.y-20);
+    ctx.font='18px monospace';
+    ctx.fillText('🔒',ex.x,ex.y-6);
+    const rem=crystals.filter(c=>!c.collected).length;
+    ctx.fillStyle='rgba(255,120,60,0.9)';
+    ctx.font='10px monospace';
+    ctx.fillText('ещё: '+rem,ex.x,ex.y+10);
+  }
+}
+
+function draw(){
+  const L=LEVELS[lv];
+  ctx.fillStyle=L.bg;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#0A1520';ctx.fillRect(0,0,W,H*0.45);
+  drawStars();
+  for(const p of L.platforms){
+    ctx.fillStyle=p.col;ctx.fillRect(p.x,p.y,p.w,p.h);
+    ctx.fillStyle='#2A4A6A';ctx.fillRect(p.x,p.y,p.w,3);
+    ctx.fillStyle='#0A1828';ctx.fillRect(p.x,p.y+p.h-3,p.w,3);
+  }
+  drawExit(L.exit);
+  for(let i=0;i<crystals.length;i++)drawCrystal(crystals[i],i);
+  for(const e of enemies)drawEnemy(e);
+  drawPlayer();
+  for(const p of particles){
+    ctx.globalAlpha=p.life;ctx.fillStyle=p.col;ctx.fillRect(p.x-2,p.y-2,4,4);ctx.globalAlpha=1;
+  }
+  if(state==='dead'){
+    ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#FF4444';ctx.font='bold 32px monospace';ctx.textAlign='center';
+    ctx.fillText('АСТРОНАВТ ПОГИБ',W/2,H/2-20);
+    ctx.fillStyle='#88AACC';ctx.font='16px monospace';
+    ctx.fillText('Нажми R для перезапуска',W/2,H/2+20);
+  }
+  if(state==='win'){
+    ctx.fillStyle='rgba(0,10,30,0.75)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#00FFCC';ctx.font='bold 28px monospace';ctx.textAlign='center';
+    ctx.fillText('СИГНАЛ НАЙДЕН!',W/2,H/2-20);
+    ctx.fillStyle='#88CCFF';ctx.font='16px monospace';
+    ctx.fillText('Миссия выполнена! R — заново',W/2,H/2+20);
+  }
+}
+
+function loop(){tick++;update();draw();requestAnimationFrame(loop);}
+loop();
+</script>
+</body>
+</html>
